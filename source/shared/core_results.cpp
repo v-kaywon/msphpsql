@@ -1563,7 +1563,8 @@ SQLPOINTER read_lob_field( _Inout_ sqlsrv_stmt* stmt, _In_ SQLUSMALLINT field_in
 
         SQLSRV_ASSERT( SQL_SUCCEEDED( r ), "Unknown SQL error not triggered" );
 
-        if ( stmt->conn->ce_option.enabled == true ) {
+		// only handled differently when AE is on and data is a varbinary(max) type since this combination does not support stream
+        if ( stmt->conn->ce_option.enabled == true && ( meta.type == SQL_VARBINARY || meta.type == SQL_LONGVARBINARY )) {
             // cursor type SQLSRV_CURSOR_BUFFERED has to be FORWARD_ONLY
             // thus has to close and reopen cursor to reset the cursor buffer
             core::SQLCloseCursor(stmt);

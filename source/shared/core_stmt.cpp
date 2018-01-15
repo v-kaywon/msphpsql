@@ -117,7 +117,7 @@ void resize_output_buffer_if_necessary( _Inout_ sqlsrv_stmt* stmt, _Inout_ zval*
                                         _In_ SQLSMALLINT c_type, _In_ SQLSMALLINT sql_type, _In_ SQLULEN column_size, _In_ SQLSMALLINT decimal_digits,
                                         _Out_writes_(buffer_len) SQLPOINTER& buffer, _Out_ SQLLEN& buffer_len TSRMLS_DC );
 void adjustInputPrecision( _Inout_ zval* param_z, _In_ SQLSMALLINT decimal_digits );
-bool reset_ae_stream_cursor( _Inout_ sqlsrv_stmt* stmt );
+bool reset_ae_stream_cursor( _Inout_ sqlsrv_stmt* stmt, _In_ SQLLEN sql_field_type );
 void save_output_param_for_later( _Inout_ sqlsrv_stmt* stmt, _Inout_ sqlsrv_output_param& param TSRMLS_DC );
 // send all the stream data
 void send_param_streams( _Inout_ sqlsrv_stmt* stmt TSRMLS_DC );
@@ -2321,8 +2321,8 @@ void get_field_as_string( _Inout_ sqlsrv_stmt* stmt, _In_ SQLUSMALLINT field_ind
 
                             field_value_temp = static_cast<char*>( sqlsrv_realloc( field_value_temp, field_len_temp + extra + 1 ));
 
-                            // reset AE stream fetch buffer
-                            if ( reset_ae_stream_cursor( stmt )){
+                            // reset AE stream fetch buffer when fetching var_binary(max) types
+                            if ( reset_ae_stream_cursor( stmt, sql_field_type )){
                                 // fetch the original column again with a bigger buffer length
                                 r = stmt->current_results->get_data( field_index + 1, c_type, field_value_temp, field_len_temp + extra,
                                     &dummy_field_len, false /*handle_warning*/ TSRMLS_CC );
@@ -2361,7 +2361,7 @@ void get_field_as_string( _Inout_ sqlsrv_stmt* stmt, _In_ SQLUSMALLINT field_ind
                         field_value_temp = static_cast<char*>( sqlsrv_realloc( field_value_temp, field_len_temp + extra + 1 ));
 
                         // reset AE stream fetch buffer
-                        if ( reset_ae_stream_cursor( stmt ) ) {
+                        if ( reset_ae_stream_cursor( stmt, sql_field_type ) ) {
                             // fetch the original column again with a bigger buffer length
                             r = stmt->current_results->get_data( field_index + 1, c_type, field_value_temp, field_len_temp + extra,
                                 &dummy_field_len, false /*handle_warning*/ TSRMLS_CC );
@@ -2637,11 +2637,10 @@ void resize_output_buffer_if_necessary( _Inout_ sqlsrv_stmt* stmt, _Inout_ zval*
     }
 }
 
-bool reset_ae_stream_cursor( _Inout_ sqlsrv_stmt* stmt ) {
-    // only handled differently when AE is on because AE does not support streaming
-    // AE only works with SQL_CURSOR_FORWARD_ONLY for max types
-    if (stmt->conn->ce_option.enabled == true && stmt->current_results->odbc->cursor_type == SQL_CURSOR_FORWARD_ONLY) {
-        // close and reopen the cursor
+bool reset_ae_stream_cursor( _Inout_ sqlsrv_stmt* stmt, _In_ SQLLEN sql_field_type ) {
+    // only handled differently when AE is on and data is a varbinary(max) type since this combination does not support stream
+    if ( stmt->conn->ce_option.enabled == true && (sql_field_type == SQL_VARBINARY || sql_field_type == SQL_LONGVARBINARY)) {
+        // otherwise close and reopen the cursor
         core::SQLCloseCursor(stmt->current_results->odbc);
         core::SQLExecute(stmt);
 
@@ -2653,7 +2652,7 @@ bool reset_ae_stream_cursor( _Inout_ sqlsrv_stmt* stmt ) {
         // FETCH_NEXT until the cursor reaches the row that it was at
         for (int i = 0; i <= stmt->fwd_row_index; i++) {
             core::SQLFetchScroll(stmt->current_results->odbc, SQL_FETCH_NEXT, 0);
-        }
+		}
         return true;
     }
     return false;
